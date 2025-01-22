@@ -90,7 +90,6 @@ import os
 
 
 import os
-
 from pydub import AudioSegment
 
 
@@ -177,7 +176,7 @@ def synthesize_text_parallel(text, language):
         end_time = time.time()  # End latency measurement
         latency = end_time - start_time
         print(f"Speech synthesis latency: {latency:.2f} seconds")
-            return response.audio_content
+        return response.audio_content
     except Exception as e:
         print(f"Error in speech synthesis: {str(e)}")
         voice.name = lang_config["fallback_voice"]
@@ -226,74 +225,68 @@ def audio_stream_generator(timeout=2):
     print("\nAudio listened.")
 
 
+import pyaudio
+import logging
+import speech_recognition as sr
+from functools import lru_cache
+from io import BytesIO
+import pydub
 
-import requests
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def initiate_call():
+@lru_cache(maxsize=None)
+def get_recognizer():
+    """Return a cached speech recognizer instance."""
+    return sr.Recognizer()
+
+def audio_stream_generator_v2(timeout=10, phrase_time_limit=None, retries=3, energy_threshold=2000, 
+                              pause_threshold=1, phrase_threshold=0.1, dynamic_energy_threshold=True, 
+                              calibration_duration=1):
     """
-    Initiates a call using the DeepCall API.
+    Generate audio stream from the microphone and yield audio chunks.
+    
+    Args:
+    timeout (int): Maximum time to wait for a phrase to start (in seconds).
+    phrase_time_limit (int): Maximum time for the phrase to be recorded (in seconds).
+    retries (int): Number of retries if recording fails.
+    energy_threshold (int): Energy threshold for considering whether a given chunk of audio is speech or not.
+    pause_threshold (float): How much silence the recognizer interprets as the end of a phrase (in seconds).
+    phrase_threshold (float): Minimum length of a phrase to consider for recording (in seconds).
+    dynamic_energy_threshold (bool): Whether to enable dynamic energy threshold adjustment.
+    calibration_duration (float): Duration of the ambient noise calibration (in seconds).
     """
-    url = f"https://s-ct3.sarv.com/v2/clickToCall/para?&user_id=77080605&token=dQboxDwaaUqy4LJgXrjA&from=6232158146&to=9303748115"
-    
+    recognizer = get_recognizer()
+    recognizer.energy_threshold = energy_threshold
+    recognizer.pause_threshold = pause_threshold
+    recognizer.phrase_threshold = phrase_threshold
+    recognizer.dynamic_energy_threshold = dynamic_energy_threshold
 
-    headers = {"cache-control": "no-cache"}
-    response = requests.post(url, headers=headers)
-    
-    print(f"Response status: {response.status_code}")
-    print(f"Response body: {response.text}")
+    try:
+        with sr.Microphone() as source:
+            # Calibrate for ambient noise
+            logging.info("Calibrating for ambient noise...")
+            recognizer.adjust_for_ambient_noise(source, duration=calibration_duration)
+            logging.info("Ready to listen")
 
-    if response.status_code == 200:
-        print("Call initiated successfully.")
-    else:
-        print(f"Failed to initiate call: {response.status_code} - {response.text}")
+            # Stream audio continuously
+            while True:
+                try:
+                    logging.info("Listening...")
+                    audio_data = recognizer.listen(source, timeout=timeout, phrase_time_limit=phrase_time_limit)
+                    logging.info("stop...")
+                    # Convert audio data to WAV and yield the chunk
+                    wav_data = audio_data.get_wav_data()
+                    yield wav_data  # This allows the caller to process chunks as they come in
+                    
+                except sr.WaitTimeoutError:
+                    logging.warning("Listening timed out, continuing...")
+                except Exception as e:
+                    logging.error(f"Failed to capture audio: {e}")
+                    break
 
-        
-import time
-import requests
-from bs4 import BeautifulSoup
-
-def check_call_connected(call_id, to_number):
-    """Checks if the call has been answered by the TO_number."""
-    url = "https://ctv1.sarv.com/telephony/0/liveCall/analysis"
-    response = requests.get(url)
-
-    if response.status_code == 200:
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        # Find the live call list
-        live_call_list = soup.find('ul', class_='livecalllist')
-        if live_call_list:
-            # Find the dynamic call block using the class name which matches call_id
-            call_block = live_call_list.find('li', class_=call_id)  # The class name is call_id
-
-            if call_block:
-                # Look for the customer number div inside this call block
-                customer_number_div = call_block.find('div', class_='cutmr_number')
-                if customer_number_div:
-                    customer_number = customer_number_div.get_text(strip=True)
-                    # If the customer number matches the TO_number, return True
-                    if customer_number == to_number:
-                        print(f"Call connected with {to_number}")
-                        return True
-
-        # If no match found, print a message and return False
-        print(f"Call not connected with {to_number} yet.")
-        return False
-
-    else:
-        print(f"Failed to retrieve live call analysis. Status code: {response.status_code}")
-        return False
-
-# Example usage:
-call_response = initiate_call("USER_ID", "TOKEN", "FROM_NUMBER", "TO_NUMBER")
-if call_response: 
-    call_id = call_response['callId']  # Extract the callId from the response
-    to_number = "9303748115"  # Replace with the actual TO number
-
-    # Poll for call connection status
-    while not check_call_connected(call_id, to_number):
-        time.sleep(5)  # Retry every 5 seconds
-
+    except Exception as e:
+        logging.error(f"Failed to initialize microphone: {e}")
 
 async def main(language):
     """Main function to run the voice assistant"""
@@ -302,14 +295,7 @@ async def main(language):
             raise ValueError(f"Unsupported language: {language}")
 
         lang_config = LANGUAGE_CONFIGS[language]
-
         print(f"Starting voice assistant in {language} using {lang_config['voice_name']}...")
-
-        call_response = initiate_call("USER_ID", "TOKEN", "FROM_NUMBER", "TO_NUMBER")
-        if not call_response:
-            return
-
-        call_id = call_response["callId"]
         async for response_text in transcribe_streaming_parallel(audio_stream_generator(), lang_config["code"]):
             audio_content = synthesize_text_parallel(response_text, language)
             audio_segment = AudioSegment.from_file(io.BytesIO(audio_content), format="wav")
@@ -320,72 +306,6 @@ async def main(language):
     except Exception as e:
         print(f"An error occurred: {str(e)}")
 
-
 if __name__ == "__main__":
-    language = "Telugu"  
+    language = "Hindi"  
     asyncio.run(main(language))
-
-
-
-# import pyaudio
-# import logging
-# import speech_recognition as sr
-# from functools import lru_cache
-# from io import BytesIO
-# import pydub
-
-# # Configure logging
-# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# @lru_cache(maxsize=None)
-# def get_recognizer():
-#     """Return a cached speech recognizer instance."""
-#     return sr.Recognizer()
-
-# def audio_stream_generator_v2(timeout=10, phrase_time_limit=None, retries=3, energy_threshold=2000, 
-#                               pause_threshold=1, phrase_threshold=0.1, dynamic_energy_threshold=True, 
-#                               calibration_duration=1):
-#     """
-#     Generate audio stream from the microphone and yield audio chunks.
-    
-#     Args:
-#     timeout (int): Maximum time to wait for a phrase to start (in seconds).
-#     phrase_time_limit (int): Maximum time for the phrase to be recorded (in seconds).
-#     retries (int): Number of retries if recording fails.
-#     energy_threshold (int): Energy threshold for considering whether a given chunk of audio is speech or not.
-#     pause_threshold (float): How much silence the recognizer interprets as the end of a phrase (in seconds).
-#     phrase_threshold (float): Minimum length of a phrase to consider for recording (in seconds).
-#     dynamic_energy_threshold (bool): Whether to enable dynamic energy threshold adjustment.
-#     calibration_duration (float): Duration of the ambient noise calibration (in seconds).
-#     """
-#     recognizer = get_recognizer()
-#     recognizer.energy_threshold = energy_threshold
-#     recognizer.pause_threshold = pause_threshold
-#     recognizer.phrase_threshold = phrase_threshold
-#     recognizer.dynamic_energy_threshold = dynamic_energy_threshold
-
-#     try:
-#         with sr.Microphone() as source:
-#             # Calibrate for ambient noise
-#             logging.info("Calibrating for ambient noise...")
-#             recognizer.adjust_for_ambient_noise(source, duration=calibration_duration)
-#             logging.info("Ready to listen")
-
-#             # Stream audio continuously
-#             while True:
-#                 try:
-#                     logging.info("Listening...")
-#                     audio_data = recognizer.listen(source, timeout=timeout, phrase_time_limit=phrase_time_limit)
-#                     logging.info("stop...")
-#                     # Convert audio data to WAV and yield the chunk
-#                     wav_data = audio_data.get_wav_data()
-#                     yield wav_data  # This allows the caller to process chunks as they come in
-                    
-#                 except sr.WaitTimeoutError:
-#                     logging.warning("Listening timed out, continuing...")
-#                 except Exception as e:
-#                     logging.error(f"Failed to capture audio: {e}")
-#                     break
-
-#     except Exception as e:
-#         logging.error(f"Failed to initialize microphone: {e}")

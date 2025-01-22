@@ -8,6 +8,7 @@ from pydub import AudioSegment
 from pydub.playback import play
 import time
 
+
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "../credentials_skilzen.json"
 GOOGLE_API_KEY = "AIzaSyCnP8cuR-cfpydBlHYbFv0fAtJhqdpHQKQ"
 genai.configure(api_key=GOOGLE_API_KEY)
