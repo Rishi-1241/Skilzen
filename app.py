@@ -1,5 +1,6 @@
-import io
-import pyaudio
+from flask import Flask
+from flask_socketio import SocketIO, emit
+from google.cloud import speech_v1p1beta1 as speech
 import google.generativeai as genai
 from google.cloud import speech
 from google.cloud import texttospeech
@@ -7,13 +8,20 @@ import os
 from pydub import AudioSegment
 from pydub.playback import play
 import time
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import time
 from google.cloud import speech, texttospeech
 import uuid
 from google.cloud.dialogflowcx_v3 import AgentsClient, SessionsClient
 from google.cloud.dialogflowcx_v3.types import session
+import os
+import os
+import io
+from google.cloud.speech_v1p1beta1 import types
+from flask import Flask, request,jsonify
+from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO
+from flask_cors import CORS
 
 
 GOOGLE_API_KEY = "AIzaSyCnP8cuR-cfpydBlHYbFv0fAtJhqdpHQKQ"
@@ -23,6 +31,7 @@ agent_id = "ab039e5f-d9ce-4feb-90ad-4184f23f01e5"  # Your Dialogflow CX agent ID
 flow_id = "dd90ab06-761a-410d-bb04-f60368c323ac"
 agent = f"projects/{project_id}/locations/{location_id}/agents/{agent_id}"
 
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "credentials_skillzen.json"
     # Use a unique session ID for the interaction
 session_id = uuid.uuid4()
 genai.configure(api_key=GOOGLE_API_KEY)
@@ -86,58 +95,7 @@ def get_dialogflow_response(text, language_code, agent, session_id, flow_id):
     ]
     return " ".join(response_messages)
 
-import os
 
-
-import os
-from pydub import AudioSegment
-
-
-async def transcribe_streaming_parallel(stream, language_code):
-    
-    """Transcribe streaming audio with latency measurement."""
-    client = speech.SpeechClient()
-    config = speech.RecognitionConfig(
-        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-        sample_rate_hertz=16000,
-        language_code=language_code,
-        model="latest_long",
-    )
-
-    streaming_config = speech.StreamingRecognitionConfig(
-        config=config,
-        interim_results=False
-    )
-
-    requests = (
-        speech.StreamingRecognizeRequest(audio_content=content)
-        for content in stream
-    )
-    
-
-    responses = client.streaming_recognize(streaming_config, requests)
-
-    for response in responses:
-        for result in response.results:
-            if result.is_final:
-                start_time = time.time()  
-               # Start latency measurement for transcription
-                transcript = result.alternatives[0].transcript
-                end_time = time.time()  # End latency measurement for transcription
-
-                transcription_latency = end_time - start_time
-                print(f"User said: {transcript}")
-                print(f"Transcription latency: {transcription_latency:.2f} seconds")
-
-                gemini_response = get_dialogflow_response(transcript, language_code,agent, session_id, flow_id)
-                print(f"Gemini responds: {gemini_response}")
-
-                yield gemini_response  # Yielding response to make this an async generator
-
-
-
-
-import asyncio
 
 response_audio_cache = {}
 
@@ -185,65 +143,28 @@ def synthesize_text_parallel(text, language):
             voice=voice,
             audio_config=audio_config
         )
+        
         return response.audio_content
 
 
+app = Flask(__name__)
 
-def audio_stream_generator(timeout=2):
-    """Generate audio stream from microphone and stop when no speech is detected for a certain timeout"""
-    p = pyaudio.PyAudio()
-    stream = p.open(
-        format=pyaudio.paInt16,
-        channels=1,
-        rate=16000,
-        input=True,
-        frames_per_buffer=256
-    )
+app.config['DEBUG'] = os.environ.get('FLASK_DEBUG')
 
-    print("Listening... (Press Ctrl+C to stop)")
-    last_activity_time = time.time()
+CORS(app)  # Enable CORS for the Flask app
+socketio = SocketIO(app, cors_allowed_origins="*")
+@app.route('/')
+def index():
+    return jsonify({"message": "SocketIO server is running"})
+@socketio.on('transcribe')
+def handle_transcribe(data):
+    transcript = data.get('text')
+    print(f"Transcribing: {transcript}")
+    if transcript:
+        response_text = get_dialogflow_response(transcript, "en-US", agent, session_id, flow_id)
+        print(f"Dialogflow response: {response_text}")
+        audio_content = synthesize_text_parallel(response_text, 'English')
+        emit('audio_response', audio_content, broadcast=True)
 
-    try:
-        while True:
-            data = stream.read(1024, exception_on_overflow=False)
-            yield data
-
-            # Check if there is silence (i.e., no activity in the stream for a while)
-            if max(abs(int(i)) for i in data) < 10:  # Threshold for silence (you can adjust this value)
-                if time.time() - last_activity_time > timeout:
-                    print("No speech detected for {} seconds, stopping...".format(timeout))
-                    break
-            else:
-                last_activity_time = time.time()
-
-    except KeyboardInterrupt:
-        pass
-
-    stream.stop_stream()
-    stream.close()
-    p.terminate()
-    print("\nAudio listened.")
-
-
-
-async def main(language):
-    """Main function to run the voice assistant"""
-    try:
-        if language not in LANGUAGE_CONFIGS:
-            raise ValueError(f"Unsupported language: {language}")
-
-        lang_config = LANGUAGE_CONFIGS[language]
-        print(f"Starting voice assistant in {language} using {lang_config['voice_name']}...")
-        async for response_text in transcribe_streaming_parallel(audio_stream_generator(), lang_config["code"]):
-            audio_content = synthesize_text_parallel(response_text, language)
-            audio_segment = AudioSegment.from_file(io.BytesIO(audio_content), format="wav")
-            play(audio_segment)
-
-    except KeyboardInterrupt:
-        print("\nExiting voice assistant...")
-    except Exception as e:
-        print(f"An error occurred: {str(e)}")
-
-if __name__ == "__main__":
-    language = "English"  
-    asyncio.run(main(language))
+if __name__ == '__main__':
+    socketio.run(app, host='0.0.0.0', port=5000,debug=True)

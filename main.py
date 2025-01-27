@@ -101,7 +101,7 @@ from pydub import AudioSegment
 
 client = OpenAI()
 
-async def transcribe_streaming_parallel(stream, language_code):
+def transcribe_streaming_parallel(stream, language_code):
     
     """Transcribe streaming audio with latency measurement."""
     client = speech.SpeechClient()

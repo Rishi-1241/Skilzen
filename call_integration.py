@@ -132,13 +132,14 @@ async def transcribe_streaming_parallel(audio_data, language_code):
             else:
                 break
 
-    requests = generate_audio_chunks(audio_stream)
-
+    request = generate_audio_chunks(audio_stream)
+    print(request)
     print("Requests created")
 
     try:
-        responses = client.streaming_recognize(streaming_config, requests)
+        responses = client.streaming_recognize(streaming_config, request)
         print("Responses received")
+        print(responses)
 
         # Logging the responses for debugging
         for response in responses:

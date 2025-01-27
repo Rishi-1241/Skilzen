@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Voice Chatbot</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <h1>AI Voice Chatbot</h1>
+    <button id="recordButton">Record</button>
+    <audio id="responseAudio" controls></audio>
+
+    <script>
+        const recordButton = document.getElementById('recordButton');
+        const responseAudio = document.getElementById('responseAudio');
+
+        let mediaRecorder;
+        let audioChunks = [];
+        let socket;
+
+        // Connect to WebSocket server
+        socket = io('http://localhost:5000');
+
+        // Handle audio response from the server
+        socket.on('audio_response', (audioData) => {
+            const audioBlob = new Blob([audioData], { type: 'audio/wav' });
+            const audioUrl = URL.createObjectURL(audioBlob);
+            responseAudio.src = audioUrl;
+            responseAudio.play();
+        });
+
+        // Start recording
+        recordButton.addEventListener('mousedown', async () => {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunks.push(event.data);  // Collect audio chunks
+                }
+            };
+
+            mediaRecorder.start();  // Start recording
+            recordButton.textContent = "Stop";  // Change button text to Stop
+        });
+
+        // Stop recording
+        recordButton.addEventListener('click', () => {
+            if (mediaRecorder && mediaRecorder.state === "recording") {
+                mediaRecorder.stop();  // Stop recording
+                recordButton.textContent = "Recording Stopped";  // Change button text
+
+                // Send the audio data to the server once recording is stopped
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm; codecs=opus'  });
+                    socket.emit('audio_recorded', audioBlob);  // Send audio to server
+                    audioChunks = [];  // Clear the audio chunks array for next recording
+                };
+            }
+        });
+    </script>
+</body>
+</html>
