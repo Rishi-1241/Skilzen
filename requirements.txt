@@ -17,4 +17,5 @@ google-cloud-dialogflow-cx
 google-generativeai
 scipy
 numpy
+eventlet>=0.24.1
 gunicorn
