@@ -5,10 +5,7 @@ import google.generativeai as genai
 from google.cloud import speech
 from google.cloud import texttospeech
 import os
-from pydub import AudioSegment
-from pydub.playback import play
 import time
-from concurrent.futures import ThreadPoolExecutor
 import time
 from google.cloud import speech, texttospeech
 import uuid
@@ -16,7 +13,6 @@ from google.cloud.dialogflowcx_v3 import AgentsClient, SessionsClient
 from google.cloud.dialogflowcx_v3.types import session
 import os
 import os
-import io
 from google.cloud.speech_v1p1beta1 import types
 from flask import Flask, request,jsonify
 from flask_socketio import SocketIO, emit
@@ -111,7 +107,7 @@ def synthesize_text_parallel(text, language):
             name=lang_config["voice_name"]
         )
     except Exception as e:
-        print(f"WaveNet voice not available, falling back to standard voice: {str(e)}")
+       # print(f"WaveNet voice not available, falling back to standard voice: {str(e)}")
         voice = texttospeech.VoiceSelectionParams(
             language_code=lang_config["code"],
             name=lang_config["fallback_voice"]
@@ -133,10 +129,10 @@ def synthesize_text_parallel(text, language):
         )
         end_time = time.time()  # End latency measurement
         latency = end_time - start_time
-        print(f"Speech synthesis latency: {latency:.2f} seconds")
+       # print(f"Speech synthesis latency: {latency:.2f} seconds")
         return response.audio_content
     except Exception as e:
-        print(f"Error in speech synthesis: {str(e)}")
+       # print(f"Error in speech synthesis: {str(e)}")
         voice.name = lang_config["fallback_voice"]
         response = client.synthesize_speech(
             input=synthesis_input,
@@ -159,12 +155,12 @@ def index():
 @socketio.on('transcribe')
 def handle_transcribe(data):
     transcript = data.get('text')
-    print(f"Transcribing: {transcript}")
+    #print(f"Transcribing: {transcript}")
     if transcript:
         response_text = get_dialogflow_response(transcript, "en-US", agent, session_id, flow_id)
-        print(f"Dialogflow response: {response_text}")
+        #print(f"Dialogflow response: {response_text}")
         audio_content = synthesize_text_parallel(response_text, 'English')
         emit('audio_response', audio_content, broadcast=True)
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000,debug=True)
+    socketio.run(app)
