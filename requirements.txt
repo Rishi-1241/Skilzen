@@ -17,3 +17,4 @@ google-cloud-dialogflow-cx
 google-generativeai
 scipy
 numpy
+gunicorn
