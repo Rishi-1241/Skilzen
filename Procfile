@@ -1,1 +1,1 @@
-gunicorn -k eventlet -w 1 app2:app
+web: waitress-serve --listen=*:${PORT} app:app

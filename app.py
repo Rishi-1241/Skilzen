@@ -163,4 +163,4 @@ def handle_transcribe(data):
         emit('audio_response', audio_content, broadcast=True)
 
 if __name__ == '__main__':
-    socketio.run(app)
+    socketio.run(app,port=5000,host='0.0.0.0')

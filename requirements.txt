@@ -19,3 +19,4 @@ scipy
 numpy
 eventlet>=0.24.1
 gunicorn
+waitress
