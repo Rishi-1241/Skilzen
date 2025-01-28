@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Transcription</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <h1>Real-Time Transcription with Google STT</h1>
+    <div id="btn-div">
+        <button id="start-btn">Start</button>
+        <button id="stop-btn" disabled>Stop</button>
+        <button id="stop-btn2">Clear Socket</button>
+    </div>
+    <h1>Transcript:</h1>
+    <div id="transcript2"></div>
+    <div id="transcript"></div>
+
+    <!-- Load the socket.io client library -->
+    <script src="/socket.io/socket.io.js"></script>
+    <!-- Load your client-side JavaScript -->
+    <script src="script.js"></script>
+</body>
+
+</html>
